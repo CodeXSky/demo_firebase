@@ -17,59 +17,185 @@
 
 // Signs-in Friendly Chat.
 function signIn() {
-  alert('TODO: Implement Google Sign-In');
-  // TODO 1: Sign in Firebase with credential from the Google user.
+  // Sign into Firebase using popup auth & Google as the identity provider.
+  var xhttp = new XMLHttpRequest();
+  xhttp.open("POST", "http://localhost:3000/login", false);
+  xhttp.setRequestHeader('Content-type', 'application/json;charset=UTF-8');
+  xhttp.send(JSON.stringify({ "email": email.value, "password": password.value }));
+  xhttp.response
+  firebase.auth().signInWithCustomToken(
+    xhttp.response
+  ).catch(function(error) {
+    var errorCode = error.code;
+    var errorMessage = error.message;
+  });
+}
+
+function loadMessageAndRoom(user) {
+  if (user) {
+    getListRooms();
+    let room_id = "1";
+    loadMessages(room_id);
+  }
+}
+
+function changeRoom(room_id) {
+  loadMessages(room_id);
 }
 
 // Signs-out of Friendly Chat.
+// Signs-out of Friendly Chat.
 function signOut() {
-  // TODO 2: Sign out of Firebase.
+  // Sign out of Firebase.
+  firebase.auth().signOut();
 }
 
 // Initiate firebase auth.
 function initFirebaseAuth() {
-  // TODO 3: Initialize Firebase.
+  // Listen to auth state changes.
+  firebase.auth().onAuthStateChanged(authStateObserver);
 }
 
 // Returns the signed-in user's profile Pic URL.
 function getProfilePicUrl() {
-  // TODO 4: Return the user's profile pic URL.
+  return firebase.auth().currentUser.photoURL || '/images/profile_placeholder.png';
 }
 
 // Returns the signed-in user's display name.
 function getUserName() {
-  // TODO 5: Return the user's display name.
+  return firebase.auth().currentUser.displayName;
+  // firebase.auth().currentUser.getIdTokenResult().then(function(claims) {
+  //   return claims["claims"]["displayName"]
+  // })
 }
 
 // Returns true if a user is signed-in.
 function isUserSignedIn() {
-  // TODO 6: Return true if a user is signed-in.
+  return !!firebase.auth().currentUser;
 }
 
 // Saves a new message on the Firebase DB.
-function saveMessage(messageText) {
-  // TODO 7: Push a new message to Firebase.
+function saveMessage(messageText, room_id) {
+  // Add a new message entry to the database.
+  return firebase.firestore().collection('messages').add({
+    room_id: room_id,
+    uid: firebase.auth().currentUser.uid,
+    name: "User by Id "+firebase.auth().currentUser.uid,
+    // name: getUserName(),
+    text: messageText,
+    profilePicUrl: getProfilePicUrl(),
+    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+  }).catch(function(error) {
+    console.error('Error writing new message to database', error);
+  });
 }
 
+function addRoom(roomId) {
+  var node = document.createElement("LI");
+  var textnode = document.createTextNode("room "+roomId);
+  node.appendChild(textnode);
+  node.classList.add("room-element");
+  node.setAttribute('data-id', roomId)
+  roomList.appendChild(node);
+}
+
+function getListRooms() {
+  var query = firebase.firestore()
+  .collection('users')
+  .doc(firebase.auth().currentUser.uid)
+  .collection('rooms')
+  .get()
+    .then(function(querySnapshot) {
+        querySnapshot.forEach(function(doc) {
+            addRoom(doc.id)
+        });
+    })
+    .catch(function(error) {
+        console.log("Error getting documents: ", error);
+    });
+}
 // Loads chat messages history and listens for upcoming ones.
-function loadMessages() {
-  // TODO 8: Load and listens for new messages.
+var query_message;
+function loadMessages(room_id) {
+  // Create the query to load the last 12 messages and listen for new ones.
+  messageListElement.innerHTML = '';
+  messageInputElement.setAttribute('data-room-id', room_id)
+  if (query_message) {
+    query_message();
+  }
+  var query = firebase.firestore()
+                      .collection('messages')
+                      .where("room_id", "==", room_id || '1')
+                      .orderBy('timestamp', 'desc')
+                      .limit(12);
+  
+  // Start listening to the query.
+  query_message = query.onSnapshot(function(snapshot) {
+    snapshot.docChanges().forEach(function(change) {
+      if (change.type === 'removed') {
+        deleteMessage(change.doc.id);
+      } else {
+        var message = change.doc.data();
+        displayMessage(change.doc.id, message.timestamp, message.name,
+                       message.text, message.profilePicUrl, message.imageUrl);
+      }
+    });
+  });
 }
 
 // Saves a new message containing an image in Firebase.
 // This first saves the image in Firebase storage.
 function saveImageMessage(file) {
-  // TODO 9: Posts a new image as a message.
+  // 1 - We add a message with a loading icon that will get updated with the shared image.
+  firebase.firestore().collection('rooms').doc('1').collection('messages').add({
+    name: getUserName(),
+    imageUrl: LOADING_IMAGE_URL,
+    profilePicUrl: getProfilePicUrl(),
+    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+  }).then(function(messageRef) {
+    // 2 - Upload the image to Cloud Storage.
+    var filePath = firebase.auth().currentUser.uid + '/' + messageRef.id + '/' + file.name;
+    return firebase.storage().ref(filePath).put(file).then(function(fileSnapshot) {
+      // 3 - Generate a public URL for the file.
+      return fileSnapshot.ref.getDownloadURL().then((url) => {
+        // 4 - Update the chat message placeholder with the image's URL.
+        return messageRef.update({
+          imageUrl: url,
+          storageUri: fileSnapshot.metadata.fullPath
+        });
+      });
+    });
+  }).catch(function(error) {
+    console.error('There was an error uploading a file to Cloud Storage:', error);
+  });
 }
 
 // Saves the messaging device token to the datastore.
 function saveMessagingDeviceToken() {
-  // TODO 10: Save the device token in the realtime datastore
+  firebase.messaging().getToken().then(function(currentToken) {
+    if (currentToken) {
+      console.log('Got FCM device token:', currentToken);
+      // Saving the Device Token to the datastore.
+      firebase.firestore().collection('fcmTokens').doc(currentToken)
+          .set({uid: firebase.auth().currentUser.uid});
+    } else {
+      // Need to request permissions to show notifications.
+      requestNotificationsPermissions();
+    }
+  }).catch(function(error){
+    console.error('Unable to get messaging token.', error);
+  });
 }
 
 // Requests permissions to show notifications.
 function requestNotificationsPermissions() {
-  // TODO 11: Request permissions to send notifications.
+  console.log('Requesting notifications permission...');
+  firebase.messaging().requestPermission().then(function() {
+    // Notification permission granted.
+    saveMessagingDeviceToken();
+  }).catch(function(error) {
+    console.error('Unable to get permission to notify.', error);
+  });
 }
 
 // Triggered when a file is selected via the media picker.
@@ -100,7 +226,7 @@ function onMessageFormSubmit(e) {
   e.preventDefault();
   // Check that the user entered a message and is signed in.
   if (messageInputElement.value && checkSignedInWithMessage()) {
-    saveMessage(messageInputElement.value).then(function() {
+    saveMessage(messageInputElement.value, messageInputElement.dataset["roomId"]).then(function() {
       // Clear message text field and re-enable the SEND button.
       resetMaterialTextfield(messageInputElement);
       toggleButton();
@@ -125,10 +251,12 @@ function authStateObserver(user) {
     signOutButtonElement.removeAttribute('hidden');
 
     // Hide sign-in button.
-    signInButtonElement.setAttribute('hidden', 'true');
+    signInFormElement.setAttribute('hidden', 'true');
 
     // We save the Firebase Messaging Device token and enable notifications.
     saveMessagingDeviceToken();
+    loadMessageAndRoom(user)
+
   } else { // User is signed out!
     // Hide user's profile and sign-out button.
     userNameElement.setAttribute('hidden', 'true');
@@ -136,7 +264,7 @@ function authStateObserver(user) {
     signOutButtonElement.setAttribute('hidden', 'true');
 
     // Show sign-in button.
-    signInButtonElement.removeAttribute('hidden');
+    signInFormElement.removeAttribute('hidden');
   }
 }
 
@@ -294,8 +422,12 @@ var mediaCaptureElement = document.getElementById('mediaCapture');
 var userPicElement = document.getElementById('user-pic');
 var userNameElement = document.getElementById('user-name');
 var signInButtonElement = document.getElementById('sign-in');
+var signInFormElement = document.getElementById('sign-in-form');
 var signOutButtonElement = document.getElementById('sign-out');
 var signInSnackbarElement = document.getElementById('must-signin-snackbar');
+var email = document.getElementById('email');
+var password = document.getElementById('password');
+var roomList = document.getElementById('room-list');
 
 // Saves message on form submit.
 messageFormElement.addEventListener('submit', onMessageFormSubmit);
@@ -312,11 +444,14 @@ imageButtonElement.addEventListener('click', function(e) {
   mediaCaptureElement.click();
 });
 mediaCaptureElement.addEventListener('change', onMediaFileSelected);
-
+document.addEventListener('click',function(e){
+  if(e.target && e.target.className == 'room-element'){
+      changeRoom(e.target.dataset["id"])
+   }
+});
 // initialize Firebase
 initFirebaseAuth();
 
 // TODO: Enable Firebase Performance Monitoring.
 
 // We load currently existing chat messages and listen to new ones.
-loadMessages();
