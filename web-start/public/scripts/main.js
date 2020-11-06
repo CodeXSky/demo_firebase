@@ -34,7 +34,7 @@ function signIn() {
 function loadMessageAndRoom(user) {
   if (user) {
     getListRooms();
-    let room_id = "1";
+    let room_id = "16";
     loadMessages(room_id);
   }
 }
@@ -125,7 +125,7 @@ function loadMessages(room_id) {
   }
   var query = firebase.firestore()
                       .collection('messages')
-                      .where("room_id", "==", room_id || '1')
+                      .where("room_id", "==", room_id || '16')
                       .orderBy('timestamp', 'desc')
                       .limit(12);
   

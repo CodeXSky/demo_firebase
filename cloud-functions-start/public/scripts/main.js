@@ -63,10 +63,24 @@ function saveMessage(messageText) {
 }
 
 // Loads chat messages history and listens for upcoming ones.
-function loadMessages() {
+async function loadMessages() {
   // Create the query to load the last 12 messages and listen for new ones.
   var query = firebase.firestore().collection('messages').orderBy('timestamp', 'desc').limit(12);
-  
+  var room = "1"
+  var allTokens = await firebase.firestore().collection('fcmTokens').get();
+  var tokens = [];
+
+  allTokens.forEach((tokenDoc) => {
+    let rooms = tokenDoc.data().rooms;
+    // console.log(rooms);
+    var a = [].concat(rooms)
+    // console.log(a);
+    if (a.includes(room)) {
+      tokens.push(tokenDoc.id);
+    };
+  });
+  console.log(tokens)
+
   // Start listening to the query.
   query.onSnapshot(function(snapshot) {
     snapshot.docChanges().forEach(function(change) {
